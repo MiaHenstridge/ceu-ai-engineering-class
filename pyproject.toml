@@ -8,5 +8,6 @@ dependencies = [
     "boto3",
     "jupyter",
     "chromadb",
-    "pysqlite3"
+    "pysqlite3",
+    "chainlit"
 ]
