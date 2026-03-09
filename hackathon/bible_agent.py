@@ -3,8 +3,19 @@ from pathlib import Path
 
 import chromadb
 from chromadb.utils import embedding_functions
-from agents import Agent, FunctionTool, function_tool
+from pydantic import BaseModel
+from agents import (
+    Agent,
+    FunctionTool,
+    function_tool,
+    RunContextWrapper,
+    GuardrailFunctionOutput,
+    input_guardrail,
+    output_guardrail,
+    Runner,
+)
 from agents.mcp import MCPServerStreamableHttp
+from openai.types.responses import TResponseInputItem
 
 import dotenv
 dotenv.load_dotenv()
@@ -81,7 +92,7 @@ def bible_lookup_tool(query: str, max_results: int = 3) -> str:
 
         genz_text = meta.get("genz_text", "").strip()
 
-        # Skip verses that have no GenZ translation yet — never return KJV to the agent
+        # Skip verses that have no GenZ translation — never return KJV to the agent
         if not genz_text:
             continue
 
@@ -107,6 +118,77 @@ exa_search_mcp = MCPServerStreamableHttp(
 )
 
 
+# ── Guardrail models ─────────────────────────────────────────────
+class ValidBibleQuery(BaseModel):
+    is_valid_query: bool
+    """Whether the user's prompt is a valid request to look up verses, and not trying to have an arbitrary conversation or task."""
+    topic: str
+    """The main topic of the user's query"""
+    reason: str
+    """If the query is invalid, explain why the trigger was tripped."""
+
+
+class SafeOutput(BaseModel):
+    is_safe: bool
+    """Whether the generated response is free from deeply offensive, hateful, or inappropriate language."""
+    redacted_response: str
+    """If the original response contained offensive language, provide a redacted or safe version. Otherwise, copy the original."""
+    reason: str
+    """If the text was deemed unsafe, explain why."""
+
+
+# ── Guardrail agents ─────────────────────────────────────────────
+input_guardrail_agent = Agent(
+    name="Input Guardrail",
+    instructions="""Check if the user is asking to look up Bible verses or asking a question
+                    that can be answered by finding relevant Bible verses.
+                    If they are asking you to write code, do math, have a casual conversation,
+                    or perform any task OTHER than finding or discussing Bible verses, set is_valid_query to False.
+                    """,
+    output_type=ValidBibleQuery,
+    model=MODEL,
+)
+
+output_guardrail_agent = Agent(
+    name="Output Guardrail",
+    instructions="""Check the generated response for two things:
+                    1. It must be non-offensive and free from hateful or inappropriate language.
+                    2. It must be written in GenZ language — NOT in old-fashioned KJV English.
+                       If the response contains KJV-style language (e.g. 'thou', 'thy', 'hath', 'begotten',
+                       'verily', 'shall'), set is_safe to False and rewrite it in GenZ slang
+                       in the redacted_response field.
+                    Always provide text in redacted_response (rewritten if unsafe/KJV, original if already good).
+                    """,
+    output_type=SafeOutput,
+    model=MODEL,
+)
+
+
+# ── Guardrail functions ───────────────────────────────────────────
+@input_guardrail
+async def bible_topic_guardrail(
+    ctx: RunContextWrapper[None], agent: Agent, input: str | list[TResponseInputItem]
+) -> GuardrailFunctionOutput:
+    result = await Runner.run(input_guardrail_agent, input, context=ctx.context)
+
+    return GuardrailFunctionOutput(
+        output_info=result.final_output,
+        tripwire_triggered=(not result.final_output.is_valid_query),
+    )
+
+
+@output_guardrail
+async def genz_output_guardrail(
+    ctx: RunContextWrapper[None], agent: Agent, response: str
+) -> GuardrailFunctionOutput:
+    result = await Runner.run(output_guardrail_agent, response, context=ctx.context)
+
+    return GuardrailFunctionOutput(
+        output_info=result.final_output,
+        tripwire_triggered=(not result.final_output.is_safe),
+    )
+
+
 # ── Agent ────────────────────────────────────────────────────────
 bible_agent = Agent(
     name="GenZ Bible Assistant",
@@ -117,15 +199,14 @@ bible_agent = Agent(
     Follow this workflow for every question:
     1) ALWAYS try bible_lookup_tool first to find relevant verses from our database.
     2) If bible_lookup_tool returns 'NO_RELEVANT_RESULTS', fall back to Exa web search
-       to find the answer from the GenZ Bible website (https://genz.bible/). 
-       NEVER USE any other websites for the Bible info.
+       to find the answer from the GenZ Bible website (https://genz.bible/).
        Only use the GenZ translation text from that site, never the original KJV text.
     3) Never skip step 1 — always check the RAG database before going to the web.
 
     STRICT OUTPUT RULES — you must follow these without exception:
     - ALWAYS quote verses in GenZ translation only — NEVER quote the original KJV English
     - The tool already gives you the GenZ translation — use exactly that text when quoting
-    - If you find yourself writing old-fashioned English (e.g. "thou", "shall", "begotten"), STOP and rephrase in GenZ
+    - If you find yourself writing old-fashioned English (e.g. 'thou', 'shall', 'begotten'), STOP and rephrase in GenZ
     - Use GenZ slang naturally in your own explanations (e.g. fr fr, no cap, bussin, slay, lowkey, vibe, it's giving)
     - Always cite the Bible reference (e.g. John 3:16) when quoting a verse
     - If the question is not related to the Bible at all, let the user know that's not your vibe
@@ -133,4 +214,6 @@ bible_agent = Agent(
     model=MODEL,
     tools=[bedrock_tool(bible_lookup_tool.__dict__)],
     mcp_servers=[exa_search_mcp],
+    input_guardrails=[bible_topic_guardrail],
+    output_guardrails=[genz_output_guardrail],
 )
