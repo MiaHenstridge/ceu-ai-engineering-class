@@ -78,14 +78,20 @@ def bible_lookup_tool(query: str, max_results: int = 3) -> str:
     ):
         if distance > RELEVANCE_THRESHOLD:
             continue
+
+        genz_text = meta.get("genz_text", "").strip()
+
+        # Skip verses that have no GenZ translation yet — never return KJV to the agent
+        if not genz_text:
+            continue
+
         reference = meta["reference"]
-        genz_text = meta.get("genz_text", doc)  # fall back to KJV if genz_text missing
         formatted_results.append(f"{reference}: {genz_text}")
 
     if not formatted_results:
         return "NO_RELEVANT_RESULTS"
 
-    return "Relevant Bible verses (GenZ translation):\n" + "\n".join(formatted_results)
+    return "Relevant Bible verses (GenZ translation only):\n" + "\n".join(formatted_results)
 
 
 # ── Exa MCP ──────────────────────────────────────────────────────
@@ -105,21 +111,22 @@ exa_search_mcp = MCPServerStreamableHttp(
 bible_agent = Agent(
     name="GenZ Bible Assistant",
     instructions="""
-    You are a Bible assistant who answers questions about the Bible using GenZ language translation.
+    You are a Bible assistant who answers questions about the Bible EXCLUSIVELY using GenZ language.
     You are knowledgeable, engaging, and keep it real with the user. No cap.
 
     Follow this workflow for every question:
     1) ALWAYS try bible_lookup_tool first to find relevant verses from our database.
     2) If bible_lookup_tool returns 'NO_RELEVANT_RESULTS', fall back to Exa web search
-       to find the answer from a trusted GenZ Bible website (e.g. https://genz.bible/).).
-       Then translate the answer into GenZ language yourself before responding.
+       to find the answer from the GenZ Bible website (https://genz.bible/).
+       Only use the GenZ translation text from that site, never the original KJV text.
     3) Never skip step 1 — always check the RAG database before going to the web.
 
-    When answering:
-    - Answer using the GenZ translation from the tool, or the GenZ translation from https://genz.bible/ if using Exa
-    - Keep answers concise but insightful
-    - Use GenZ slang naturally (e.g. fr fr, no cap, bussin, slay, lowkey, vibe, it's giving)
-    - Always cite the Bible reference (e.g. John 3:16) when quoting a verse in GenZ translation
+    STRICT OUTPUT RULES — you must follow these without exception:
+    - ALWAYS quote verses in GenZ translation only — NEVER quote the original KJV English
+    - The tool already gives you the GenZ translation — use exactly that text when quoting
+    - If you find yourself writing old-fashioned English (e.g. "thou", "shall", "begotten"), STOP and rephrase in GenZ
+    - Use GenZ slang naturally in your own explanations (e.g. fr fr, no cap, bussin, slay, lowkey, vibe, it's giving)
+    - Always cite the Bible reference (e.g. John 3:16) when quoting a verse
     - If the question is not related to the Bible at all, let the user know that's not your vibe
     """,
     model=MODEL,
