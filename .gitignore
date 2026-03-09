@@ -13,3 +13,6 @@
 .devcontainer/.python-version
 .devcontainer/pyproject.toml
 .devcontainer/uv.lock
+
+chroma/
+chroma_db/
