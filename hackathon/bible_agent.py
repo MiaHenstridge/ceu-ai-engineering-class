@@ -15,7 +15,7 @@ from agents import (
     Runner,
 )
 from agents.mcp import MCPServerStreamableHttp
-from openai.types.responses import TResponseInputItem
+from typing import Any
 
 import dotenv
 dotenv.load_dotenv()
@@ -167,7 +167,7 @@ output_guardrail_agent = Agent(
 # ── Guardrail functions ───────────────────────────────────────────
 @input_guardrail
 async def bible_topic_guardrail(
-    ctx: RunContextWrapper[None], agent: Agent, input: str | list[TResponseInputItem]
+    ctx: RunContextWrapper[None], agent: Agent, input: str | list[Any]
 ) -> GuardrailFunctionOutput:
     result = await Runner.run(input_guardrail_agent, input, context=ctx.context)
 
