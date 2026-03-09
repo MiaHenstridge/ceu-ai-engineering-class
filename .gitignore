@@ -14,5 +14,5 @@
 .devcontainer/pyproject.toml
 .devcontainer/uv.lock
 
-chroma/
-chroma_db/
+# chroma/
+# chroma_db/
