@@ -117,7 +117,8 @@ bible_agent = Agent(
     Follow this workflow for every question:
     1) ALWAYS try bible_lookup_tool first to find relevant verses from our database.
     2) If bible_lookup_tool returns 'NO_RELEVANT_RESULTS', fall back to Exa web search
-       to find the answer from the GenZ Bible website (https://genz.bible/).
+       to find the answer from the GenZ Bible website (https://genz.bible/). 
+       NEVER USE any other websites for the Bible info.
        Only use the GenZ translation text from that site, never the original KJV text.
     3) Never skip step 1 — always check the RAG database before going to the web.
 
